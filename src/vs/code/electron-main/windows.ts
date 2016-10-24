@@ -6,6 +6,7 @@
 'use strict';
 
 import * as path from 'path';
+import * as os from 'os';
 import * as fs from 'original-fs';
 import * as platform from 'vs/base/common/platform';
 import * as nls from 'vs/nls';
@@ -417,6 +418,20 @@ export class WindowsManager implements IWindowsService {
 			}
 		});
 
+		ipc.on('vscode:setHeaders', (event, windowId: number, urls: string[], headers: any) => {
+			this.logService.log('IPC#vscode:setHeaders');
+
+			const vscodeWindow = this.getWindowById(windowId);
+
+			if (!vscodeWindow || !urls || !urls.length || !headers) {
+				return;
+			}
+
+			vscodeWindow.win.webContents.session.webRequest.onBeforeSendHeaders({ urls }, (details, cb) => {
+				cb({ cancel: false, requestHeaders: assign(details.requestHeaders, headers) });
+			});
+		});
+
 		ipc.on('vscode:broadcast', (event, windowId: number, target: string, broadcast: { channel: string; payload: any; }) => {
 			if (broadcast.channel && !types.isUndefinedOrNull(broadcast.payload)) {
 				this.logService.log('IPC#vscode:broadcast', target, broadcast.channel, broadcast.payload);
@@ -530,8 +545,26 @@ export class WindowsManager implements IWindowsService {
 
 			loggedStartupTimes = true;
 
-			window.send('vscode:telemetry', { eventName: 'startupTime', data: { ellapsed: Date.now() - global.vscodeStart } });
+			this.logStartupTimes(window);
 		});
+	}
+
+	private logStartupTimes(window: VSCodeWindow): void {
+		let totalmem: number;
+		let cpus: { count: number; speed: number; model: string; };
+
+		try {
+			totalmem = os.totalmem();
+
+			const rawCpus = os.cpus();
+			if (rawCpus && rawCpus.length > 0) {
+				cpus = { count: rawCpus.length, speed: rawCpus[0].speed, model: rawCpus[0].model };
+			}
+		} catch (error) {
+			this.logService.log(error); // be on the safe side with these hardware method calls
+		}
+
+		window.send('vscode:telemetry', { eventName: 'startupTime', data: { ellapsed: Date.now() - global.vscodeStart }, totalmem, cpus });
 	}
 
 	private onBroadcast(event: string, payload: any): void {

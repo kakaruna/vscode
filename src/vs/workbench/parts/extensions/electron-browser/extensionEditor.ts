@@ -36,7 +36,7 @@ import { EditorOptions } from 'vs/workbench/common/editor';
 import { shell } from 'electron';
 import product from 'vs/platform/product';
 import { ActionBar } from 'vs/base/browser/ui/actionbar/actionbar';
-import { CombinedInstallAction, UpdateAction, EnableAction, BuiltinStatusLabelAction } from './extensionsActions';
+import { CombinedInstallAction, UpdateAction, EnableAction, DisableAction, ReloadAction, BuiltinStatusLabelAction } from './extensionsActions';
 import WebView from 'vs/workbench/parts/html/browser/webview';
 import { Keybinding } from 'vs/base/common/keybinding';
 import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
@@ -186,7 +186,18 @@ export class ExtensionEditor extends BaseEditor {
 		this.description = append(details, $('.description'));
 
 		const extensionActions = append(details, $('.actions'));
-		this.extensionActionBar = new ActionBar(extensionActions, { animated: false });
+		this.extensionActionBar = new ActionBar(extensionActions, {
+			animated: false,
+			actionItemProvider: (action: Action) => {
+				if (action.id === EnableAction.ID) {
+					return (<EnableAction>action).actionItem;
+				}
+				if (action.id === DisableAction.ID) {
+					return (<DisableAction>action).actionItem;
+				}
+				return null;
+			}
+		});
 		this.disposables.push(this.extensionActionBar);
 
 		chain(fromEventEmitter<{ error?: any; }>(this.extensionActionBar, 'run'))
@@ -218,6 +229,7 @@ export class ExtensionEditor extends BaseEditor {
 
 		this.name.textContent = extension.displayName;
 		this.identifier.textContent = `${extension.publisher}.${extension.name}`;
+
 		this.publisher.textContent = extension.publisherDisplayName;
 		this.description.textContent = extension.description;
 
@@ -251,27 +263,26 @@ export class ExtensionEditor extends BaseEditor {
 		const installAction = this.instantiationService.createInstance(CombinedInstallAction);
 		const updateAction = this.instantiationService.createInstance(UpdateAction);
 		const enableAction = this.instantiationService.createInstance(EnableAction);
+		const disableAction = this.instantiationService.createInstance(DisableAction);
+		const reloadAction = this.instantiationService.createInstance(ReloadAction);
 
 		installAction.extension = extension;
 		builtinStatusAction.extension = extension;
 		updateAction.extension = extension;
 		enableAction.extension = extension;
+		disableAction.extension = extension;
+		reloadAction.extension = extension;
 
 		this.extensionActionBar.clear();
-		this.extensionActionBar.push([enableAction, updateAction, installAction, builtinStatusAction], { icon: true, label: true });
-		this.transientDisposables.push(enableAction, updateAction, installAction, builtinStatusAction);
+		this.extensionActionBar.push([enableAction, updateAction, reloadAction, disableAction, installAction, builtinStatusAction], { icon: true, label: true });
+		this.transientDisposables.push(enableAction, updateAction, reloadAction, disableAction, installAction, builtinStatusAction);
 
 		this.navbar.clear();
 		this.navbar.onChange(this.onNavbarChange.bind(this, extension), this, this.transientDisposables);
 		this.navbar.push(NavbarSection.Readme, localize('details', "Details"));
 		this.navbar.push(NavbarSection.Contributions, localize('contributions', "Contributions"));
-
-		if (extension.hasChangelog) {
-			this.navbar.push(NavbarSection.Changelog, localize('changelog', "Changelog"));
-		}
-		if (extension.hasDependencies) {
-			this.navbar.push(NavbarSection.Dependencies, localize('dependencies', "Dependencies"));
-		}
+		this.navbar.push(NavbarSection.Changelog, localize('changelog', "Changelog"));
+		this.navbar.push(NavbarSection.Dependencies, localize('dependencies', "Dependencies"));
 
 		this.content.innerHTML = '';
 
@@ -285,7 +296,7 @@ export class ExtensionEditor extends BaseEditor {
 			case NavbarSection.Readme: return this.openReadme();
 			case NavbarSection.Contributions: return this.openContributions();
 			case NavbarSection.Changelog: return this.openChangelog();
-			case NavbarSection.Dependencies: return this.openDependencies();
+			case NavbarSection.Dependencies: return this.openDependencies(extension);
 		}
 	}
 
@@ -307,7 +318,7 @@ export class ExtensionEditor extends BaseEditor {
 				this.contentDisposables.push(webview);
 			})
 			.then(null, () => {
-				const p = append(this.content, $('p'));
+				const p = append(this.content, $('p.nocontent'));
 				p.textContent = noContentCopy;
 			}));
 	}
@@ -317,7 +328,7 @@ export class ExtensionEditor extends BaseEditor {
 	}
 
 	private openChangelog() {
-		return this.openMarkdown(this.extensionChangelog.get(), localize('noChangelog', "No CHANGELOG available."));
+		return this.openMarkdown(this.extensionChangelog.get(), localize('noChangelog', "No Changelog available."));
 	}
 
 	private openContributions() {
@@ -325,25 +336,36 @@ export class ExtensionEditor extends BaseEditor {
 			.then(manifest => {
 				const content = $('div', { class: 'subcontent' });
 				const scrollableContent = new DomScrollableElement(content, { canUseTranslate3d: false });
-				append(this.content, scrollableContent.getDomNode());
-				this.contentDisposables.push(scrollableContent);
 
 				const layout = () => scrollableContent.scanDomNode();
 				const removeLayoutParticipant = arrays.insert(this.layoutParticipants, { layout });
 				this.contentDisposables.push(toDisposable(removeLayoutParticipant));
 
-				ExtensionEditor.renderSettings(content, manifest, layout);
-				this.renderCommands(content, manifest, layout);
-				ExtensionEditor.renderLanguages(content, manifest, layout);
-				ExtensionEditor.renderThemes(content, manifest, layout);
-				ExtensionEditor.renderJSONValidation(content, manifest, layout);
-				ExtensionEditor.renderDebuggers(content, manifest, layout);
+				let isEmpty = true;
+				isEmpty = isEmpty && !ExtensionEditor.renderSettings(content, manifest, layout);
+				isEmpty = isEmpty && !this.renderCommands(content, manifest, layout);
+				isEmpty = isEmpty && !ExtensionEditor.renderLanguages(content, manifest, layout);
+				isEmpty = isEmpty && !ExtensionEditor.renderThemes(content, manifest, layout);
+				isEmpty = isEmpty && !ExtensionEditor.renderJSONValidation(content, manifest, layout);
+				isEmpty = isEmpty && !ExtensionEditor.renderDebuggers(content, manifest, layout);
 
 				scrollableContent.scanDomNode();
+
+				if (isEmpty) {
+					append(this.content, $('p.nocontent')).textContent = localize('noContributions', "No Contributions");
+					return;
+				} else {
+					append(this.content, scrollableContent.getDomNode());
+					this.contentDisposables.push(scrollableContent);
+				}
 			}));
 	}
 
-	private openDependencies() {
+	private openDependencies(extension: IExtension) {
+		if (extension.dependencies.length === 0) {
+			append(this.content, $('p.nocontent')).textContent = localize('noDependencies', "No Dependencies");
+			return;
+		}
 		addClass(this.content, 'loading');
 		this.extensionDependencies.get().then(extensionDependencies => {
 			removeClass(this.content, 'loading');
@@ -367,7 +389,7 @@ export class ExtensionEditor extends BaseEditor {
 	}
 
 	private static renderDependencies(container: HTMLElement, extensionDependencies: IExtensionDependencies, instantiationService: IInstantiationService): Tree {
-		const renderer = new Renderer();
+		const renderer = instantiationService.createInstance(Renderer);
 		const controller = instantiationService.createInstance(Controller);
 		const tree = new Tree(container, {
 			dataSource: new DataSource(),
@@ -381,14 +403,14 @@ export class ExtensionEditor extends BaseEditor {
 		return tree;
 	}
 
-	private static renderSettings(container: HTMLElement, manifest: IExtensionManifest, onDetailsToggle: Function): void {
+	private static renderSettings(container: HTMLElement, manifest: IExtensionManifest, onDetailsToggle: Function): boolean {
 		const contributes = manifest.contributes;
 		const configuration = contributes && contributes.configuration;
 		const properties = configuration && configuration.properties;
 		const contrib = properties ? Object.keys(properties) : [];
 
 		if (!contrib.length) {
-			return;
+			return false;
 		}
 
 		const details = $('details', { open: true, ontoggle: onDetailsToggle },
@@ -408,14 +430,15 @@ export class ExtensionEditor extends BaseEditor {
 		);
 
 		append(container, details);
+		return true;
 	}
 
-	private static renderDebuggers(container: HTMLElement, manifest: IExtensionManifest, onDetailsToggle: Function): void {
+	private static renderDebuggers(container: HTMLElement, manifest: IExtensionManifest, onDetailsToggle: Function): boolean {
 		const contributes = manifest.contributes;
 		const contrib = contributes && contributes.debuggers || [];
 
 		if (!contrib.length) {
-			return;
+			return false;
 		}
 
 		const details = $('details', { open: true, ontoggle: onDetailsToggle },
@@ -427,14 +450,15 @@ export class ExtensionEditor extends BaseEditor {
 		);
 
 		append(container, details);
+		return true;
 	}
 
-	private static renderThemes(container: HTMLElement, manifest: IExtensionManifest, onDetailsToggle: Function): void {
+	private static renderThemes(container: HTMLElement, manifest: IExtensionManifest, onDetailsToggle: Function): boolean {
 		const contributes = manifest.contributes;
 		const contrib = contributes && contributes.themes || [];
 
 		if (!contrib.length) {
-			return;
+			return false;
 		}
 
 		const details = $('details', { open: true, ontoggle: onDetailsToggle },
@@ -443,14 +467,15 @@ export class ExtensionEditor extends BaseEditor {
 		);
 
 		append(container, details);
+		return true;
 	}
 
-	private static renderJSONValidation(container: HTMLElement, manifest: IExtensionManifest, onDetailsToggle: Function): void {
+	private static renderJSONValidation(container: HTMLElement, manifest: IExtensionManifest, onDetailsToggle: Function): boolean {
 		const contributes = manifest.contributes;
 		const contrib = contributes && contributes.jsonValidation || [];
 
 		if (!contrib.length) {
-			return;
+			return false;
 		}
 
 		const details = $('details', { open: true, ontoggle: onDetailsToggle },
@@ -459,9 +484,10 @@ export class ExtensionEditor extends BaseEditor {
 		);
 
 		append(container, details);
+		return true;
 	}
 
-	private renderCommands(container: HTMLElement, manifest: IExtensionManifest, onDetailsToggle: Function): void {
+	private renderCommands(container: HTMLElement, manifest: IExtensionManifest, onDetailsToggle: Function): boolean {
 		const contributes = manifest.contributes;
 		const rawCommands = contributes && contributes.commands || [];
 		const commands = rawCommands.map(c => ({
@@ -505,7 +531,7 @@ export class ExtensionEditor extends BaseEditor {
 		});
 
 		if (!commands.length) {
-			return;
+			return false;
 		}
 
 		const details = $('details', { open: true, ontoggle: onDetailsToggle },
@@ -527,9 +553,10 @@ export class ExtensionEditor extends BaseEditor {
 		);
 
 		append(container, details);
+		return true;
 	}
 
-	private static renderLanguages(container: HTMLElement, manifest: IExtensionManifest, onDetailsToggle: Function): void {
+	private static renderLanguages(container: HTMLElement, manifest: IExtensionManifest, onDetailsToggle: Function): boolean {
 		const contributes = manifest.contributes;
 		const rawLanguages = contributes && contributes.languages || [];
 		const languages = rawLanguages.map(l => ({
@@ -571,7 +598,7 @@ export class ExtensionEditor extends BaseEditor {
 		});
 
 		if (!languages.length) {
-			return;
+			return false;
 		}
 
 		const details = $('details', { open: true, ontoggle: onDetailsToggle },
@@ -595,6 +622,7 @@ export class ExtensionEditor extends BaseEditor {
 		);
 
 		append(container, details);
+		return true;
 	}
 
 	private keybindingToLabel(rawKeyBinding: IKeyBinding): string {

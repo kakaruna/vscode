@@ -15,6 +15,7 @@ import { OneGetThreadService } from './testThreadService';
 import * as EditorCommon from 'vs/editor/common/editorCommon';
 import { IResourceEdit } from 'vs/editor/common/services/bulkEdit';
 import { SaveReason } from 'vs/workbench/services/textfile/common/textfiles';
+import * as vscode from 'vscode';
 
 suite('ExtHostDocumentSaveParticipant', () => {
 
@@ -35,6 +36,7 @@ suite('ExtHostDocumentSaveParticipant', () => {
 				lines: ['foo'],
 				BOM: '',
 				length: -1,
+				containsRTL: false,
 				options: {
 					tabSize: 4,
 					insertSpaces: true,

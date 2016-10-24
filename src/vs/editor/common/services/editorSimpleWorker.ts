@@ -22,8 +22,8 @@ import { getWordAtText, ensureValidWordDefinition } from 'vs/editor/common/model
 import { createMonacoBaseAPI } from 'vs/editor/common/standalone/standaloneBase';
 
 export interface IMirrorModel {
-	uri: URI;
-	version: number;
+	readonly uri: URI;
+	readonly version: number;
 	getValue(): string;
 }
 
@@ -244,12 +244,12 @@ export abstract class BaseEditorSimpleWorker {
 	}
 
 	private _suggestFiltered(model: ICommonModel, position: editorCommon.IPosition, wordDefRegExp: RegExp): ISuggestResult {
+		let currentWord = model.getWordUntilPosition(position, wordDefRegExp).word;
 		let value = this._suggestUnfiltered(model, position, wordDefRegExp);
 
 		// filter suggestions
 		return {
-			currentWord: value.currentWord,
-			suggestions: value.suggestions.filter((element) => !!fuzzyContiguousFilter(value.currentWord, element.label)),
+			suggestions: value.suggestions.filter((element) => !!fuzzyContiguousFilter(currentWord, element.label)),
 			incomplete: value.incomplete
 		};
 	}
@@ -269,10 +269,7 @@ export abstract class BaseEditorSimpleWorker {
 			};
 		});
 
-		return {
-			currentWord: currentWord,
-			suggestions: suggestions
-		};
+		return { suggestions };
 	}
 
 	// ---- END suggest --------------------------------------------------------------------------
@@ -286,7 +283,12 @@ export abstract class BaseEditorSimpleWorker {
 		let wordDefRegExp = new RegExp(wordDef, wordDefFlags);
 
 		if (range.startColumn === range.endColumn) {
-			range.endColumn += 1;
+			range = {
+				startLineNumber: range.startLineNumber,
+				startColumn: range.startColumn,
+				endLineNumber: range.endLineNumber,
+				endColumn: range.endColumn + 1
+			};
 		}
 
 		let selectionText = model.getValueInRange(range);

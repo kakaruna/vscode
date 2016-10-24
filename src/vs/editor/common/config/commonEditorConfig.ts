@@ -655,7 +655,7 @@ let editorConfiguration: IConfigurationNode = {
 			'type': 'string',
 			'enum': ['off', 'on', 'relative'],
 			'default': DefaultConfig.editor.lineNumbers,
-			'description': nls.localize('lineNumbers', "Controls visibility of line numbers")
+			'description': nls.localize('lineNumbers', "Controls the display of line numbers. Possible values are 'on', 'off', and 'relative'. 'relative' shows the line count from the current cursor position.")
 		},
 		'editor.rulers': {
 			'type': 'array',
@@ -851,6 +851,11 @@ let editorConfiguration: IConfigurationNode = {
 			'type': 'boolean',
 			'default': DefaultConfig.editor.folding,
 			'description': nls.localize('folding', "Controls whether the editor has code folding enabled")
+		},
+		'editor.glyphMargin': {
+			'type': 'boolean',
+			'default': DefaultConfig.editor.glyphMargin,
+			'description': nls.localize('glyphMargin', "Controls whether the editor should render the vertical glyph margin. Glyph margin is mostly used for debugging.")
 		},
 		'editor.useTabStops': {
 			'type': 'boolean',
